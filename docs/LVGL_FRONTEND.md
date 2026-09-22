@@ -10,9 +10,10 @@ drivers.
 
 The bounded dummy-video path has been built and exercised with the private ROM.
 Its LVGL-composited screenshot is 320x240, contains five colors, and visibly
-shows the TI-84 Plus CE OS 5.3.0.0037 `RAM Cleared` screen. Desktop-window
-appearance, live updates, and keyboard interaction still require the user's
-manual validation and must not be treated as confirmed yet.
+shows the TI-84 Plus CE OS 5.3.0.0037 `RAM Cleared` screen. The user has also
+manually confirmed the desktop window, live updates, keyboard input, and TI-OS
+calculations. This is x86 desktop validation only; it does not validate a T113
+display or keypad backend.
 
 ## LVGL Dependency
 
@@ -146,8 +147,8 @@ SDL_VIDEODRIVER=dummy ./build/ce_lvgl_host \
 
 - The UI is deliberately only a framebuffer canvas; it is not the final
   calculator application design.
-- Desktop-window visuals, live updates, and interaction await the user's
-  manual validation.
+- Desktop-window visuals and input are validated on x86; no target display or
+  physical-keypad adapter exists yet.
 - The keyboard map is provisional and based on physical scancodes; it is not a
   configurable logical-key input system.
 - The application-facing API does not yet declare framebuffer dimensions or

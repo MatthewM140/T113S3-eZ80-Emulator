@@ -1,6 +1,6 @@
 # Calculator Emulator Project State
 
-Last verified: 2026-09-21
+Last verified: 2026-09-22
 
 This is the master checkpoint for the project. `STATUS.md` is the detailed
 historical engineering log; `docs/FROM_SCRATCH_EMULATOR.md` and
@@ -10,11 +10,12 @@ precedence.
 
 ## Current State in One Page
 
-The project is an early x86-64 development version of a larger Linux handheld
-graphing-calculator application. Its final hardware target is an Allwinner
-T113-S3 (dual-core ARM Cortex-A7) running a lightweight Linux system, likely
-Buildroot, with a custom display and keypad plus future camera, networking,
-and server-assisted AI features.
+This repository is the standalone TI emulator application for a larger Linux
+calculator system. It is not the calculator launcher/home application, CAS,
+AI/camera application, or complete product UI. Those are separate future
+projects which may launch and manage this process. The final emulator hardware
+target is an Allwinner T113-S3 (dual-core ARM Cortex-A7) running a lightweight
+32-bit Linux system, likely Buildroot, with a custom display and keypad.
 
 TI-84 Plus CE compatibility is currently provided by a headless integration
 of CEmu behind a small project-owned C API. This path is the primary emulator
@@ -30,23 +31,29 @@ requested.
 
 The first LVGL application path now exists on x86 Linux. `ce_lvgl_host` wraps
 the live CEmu framebuffer in an LVGL canvas and presents LVGL's composited
-output through a project-owned SDL3 adapter. Its bounded headless output has
-been inspected successfully; desktop-window appearance, live updates, and
-keyboard interaction await the user's manual confirmation. The existing
-`ce_host` remains unchanged as the minimal known-good emulator frontend.
-Buildroot, T113 display/input support, and ARM performance work have not
-started.
+output through a project-owned SDL3 adapter. Its bounded output and live
+desktop-window/input path have both been manually validated by the user. The
+existing `ce_host` remains unchanged as the minimal known-good emulator
+frontend.
+
+The stable deployable process is `calculator-emulator`. It loads an external
+ROM, runs as a well-behaved headless Linux process, handles `SIGINT`/`SIGTERM`,
+and provides a portable one-tick-granularity benchmark. SDL3 is no longer
+required for headless builds. A Cortex-A7 hard-float toolchain file now produces
+a verified ELF32 ARM EABI5 executable, and the portable LVGL layer also
+cross-compiles. No T113 runtime, display, keypad, thermals, or performance
+claim has been made without hardware.
 
 ## Product and Hardware Goal
 
-The intended product is not a reskinned CEmu desktop window. CEmu is one engine
-inside a broader calculator application which is expected eventually to offer:
+The emulator is one separately launched process in the intended device. The
+larger system is expected eventually to contain:
 
-- a TI calculator mode;
-- a custom home screen, menus, settings, and applications;
-- camera and networking features;
-- AI features, with most inference expected to run on a server; and
-- a physical display and keypad on the T113-S3 device.
+- this TI emulator application;
+- a separate launcher/home and settings application;
+- separate future CAS and advanced-calculator applications;
+- separate future AI/camera/networking applications; and
+- physical display and keypad integration on the T113-S3 device.
 
 The current development host is x86-64 Arch Linux. The intended migration is a
 native ARM build; x86 itself will not be emulated on the T113.
@@ -83,6 +90,21 @@ CEmu -> project emulator API -> portable LVGL application/canvas
                             -> desktop window
 ```
 
+Standalone/deployment architecture:
+
+```text
+future launcher (separate process/project)
+        |
+        v
+calculator-emulator --rom ABSOLUTE_PATH
+        |
+        v
+project emulator API -> headless CEmu core
+        |
+        +---- current: real-time headless run / portable benchmark
+        +---- future: LVGL plus target display/input adapters
+```
+
 Planned hardware architecture:
 
 ```text
@@ -99,7 +121,9 @@ outside the emulator core and its public API.
 
 | Path | Purpose |
 | --- | --- |
-| `CMakeLists.txt` | All project build options and targets. |
+| `README.md` | Repository role and native-development quick start. |
+| `CMakeLists.txt` | Build options, targets, and standalone-app install rule. |
+| `cmake/toolchains/armv7a-linux-gnueabihf.cmake` | Configurable Cortex-A7/ARMv7-A hard-float Linux cross-toolchain definition. |
 | `core/include/ce/emulator.h` | Backend-neutral application-facing emulator API. |
 | `core/src/cemu_backend.c` | Current implementation of that API for both backend choices; links directly to CEmu only inside this translation unit. |
 | `core/include/ce/machine.h`, `core/src/machine.c` | Preserved from-scratch machine, CPU subset, memory/MMIO, and interrupt model. |
@@ -109,19 +133,20 @@ outside the emulator core and its public API.
 | `host/cemu_boot_probe.c` | Headless CEmu debug-state probe. |
 | `host/ce_host.c` | SDL3 reference frontend, keyboard bridge, and PPM screenshot writer. |
 | `host/ce_lvgl_host.c` | LVGL frontend entry point, CLI, and real-time one-tick scheduler loop. |
+| `app/calculator_emulator.c` | Standalone target process, CLI, signals, real-time headless loop, and benchmark. |
 | `app/ce_lvgl_app.*` | Portable LVGL canvas/application layer above the emulator API. |
 | `platform/sdl3/ce_lvgl_sdl3.*` | Replaceable desktop LVGL display, clock, screenshot, and keyboard adapter. |
 | `config/lv_conf.h` | Project LVGL configuration. |
 | `third_party/cemu/` | GPLv3 CEmu checkout pinned at the commit below, including its unused Qt/SDL frontends and tests. |
 | `third_party/lvgl/` | Unmodified MIT-licensed LVGL v9.6.0 checkout pinned at the commit below. |
 | `third_party/cemu_headless.c` | Project-owned GUI callback, revision-selection, and no-physical-USB glue. |
-| `docs/` | Backend-specific project documentation. |
+| `docs/ARM_T113_DEPLOYMENT.md` | Cross-build, ABI, install, Buildroot, benchmark, and first-board procedure. |
+| `docs/` | Backend and platform-specific project documentation. |
 | `STATUS.md` | Detailed chronological investigation log; useful but no longer the best current-state entry point. |
 
-The project root is not currently a Git working tree. `third_party/cemu/` is a
-nested, grafted Git checkout. This means root-level change history and tracking
-status cannot presently be audited with Git; a future repository setup must be
-done without ever adding the private ROM.
+The project root is a Git working tree. CEmu and LVGL are proper Git submodules
+at the pinned commits recorded below. Root `/*.rom` is ignored; the private ROM
+must remain untracked external runtime data.
 
 ## Build System and Targets
 
@@ -130,9 +155,11 @@ LVGL CMake target also enables C++ and assembly languages, so the normal LVGL
 build needs the corresponding host toolchain. `CTest` is enabled through
 CMake's standard `BUILD_TESTING` option.
 
-`CE_ENABLE_CEMU` and `CE_ENABLE_LVGL` default to `ON`. The LVGL option is used
-only inside the CEmu-enabled build because this first frontend consumes the
-CEmu-backed framebuffer.
+`CE_ENABLE_CEMU`, `CE_ENABLE_LVGL`, `CE_ENABLE_DESKTOP_FRONTENDS`, and
+`CE_BUILD_TARGET_APP` default to `ON`. `CE_ENABLE_LVGL` builds the portable
+LVGL application layer. `CE_ENABLE_DESKTOP_FRONTENDS` exclusively controls
+SDL3 discovery and the two desktop hosts, allowing target/headless builds to
+remain SDL-independent.
 
 Always-built targets:
 
@@ -152,16 +179,18 @@ Additional targets with `CE_ENABLE_CEMU=ON`:
 | `ce_lvgl_app` | static library | Portable LVGL canvas/application integration. |
 | `ce_lvgl_sdl3` | static library | Replaceable SDL3 desktop adapter for LVGL. |
 | `ce_lvgl_host` | executable | First x86 LVGL frontend. |
+| `calculator-emulator` | executable/install target | Standalone Linux emulator process and portable benchmark; no SDL dependency. |
 
-SDL3 is currently a required configure-time dependency whenever
-`CE_ENABLE_CEMU=ON`, even if only the headless library or probe is wanted.
-`pkg-config` is used to find it. With CEmu disabled, SDL3 is not required and
-only the from-scratch targets are built.
+SDL3 and `pkg-config` are required only with
+`CE_ENABLE_DESKTOP_FRONTENDS=ON`. They are not configured or linked for the
+standalone application or headless ARM build. With CEmu disabled, only the
+from-scratch targets are built.
 
 Normal build and test:
 
 ```sh
 cmake -S . -B build -DCE_ENABLE_CEMU=ON -DCE_ENABLE_LVGL=ON \
+  -DCE_ENABLE_DESKTOP_FRONTENDS=ON \
   -DCMAKE_BUILD_TYPE=Debug
 cmake --build build --parallel
 ctest --test-dir build --output-on-failure
@@ -176,8 +205,9 @@ cmake --build build-no-cemu --parallel
 ctest --test-dir build-no-cemu --output-on-failure
 ```
 
-Only `ce_rom_tests` is registered with CTest. Both ROM probes and the SDL/LVGL
-end-to-end runs are manual validations because they require the private ROM.
+CTest registers `ce_rom_tests` and a no-ROM `calculator_emulator_help` CLI
+test. ROM probes and SDL/LVGL end-to-end runs remain manual validations because
+they require the private ROM.
 
 ## Public Emulator API
 
@@ -444,6 +474,52 @@ Interactive launch:
 ./build/ce_lvgl_host --rom ./ti-84ce.rom --revision i --scale 2
 ```
 
+The user has now manually confirmed the LVGL desktop window, live TI-OS
+updates, keyboard input, and calculations. This validates the complete x86
+development path but does not validate a T113 display backend.
+
+## Standalone Linux Application
+
+`calculator-emulator` is the stable executable intended for eventual launch by
+the separate calculator launcher. It links the CEmu-backed project API but no
+SDL library. Its required `--rom PATH` accepts an absolute or caller-relative
+external ROM path; there is no repository or current-working-directory
+assumption. `--revision pre-a|i|m` defaults to I, and `--help` succeeds without
+a ROM. Invalid CLI values and ROM load failures produce useful messages and
+distinct nonzero exit statuses.
+
+Until a real target display/input adapter is selected, normal operation is
+explicitly headless. It advances at 60 one-tick CEmu scheduler calls per
+wall-clock second and exits cleanly on `SIGINT` or `SIGTERM`. The portable
+benchmark removes pacing but retains one-call-per-tick granularity:
+
+```sh
+./build/calculator-emulator --rom ./ti-84ce.rom --revision i \
+  --benchmark-ticks 3600
+```
+
+It reports emulated seconds, elapsed monotonic time, scheduler ticks/second,
+and real-time factor. `1.0` means the required 60 ticks/second. CPU, RSS,
+temperature, frequency, and throttling should be recorded with target Linux
+tools when hardware arrives.
+
+## ARMv7-A Cross-Build Status
+
+`cmake/toolchains/armv7a-linux-gnueabihf.cmake` supplies a configurable 32-bit
+Linux toolchain for the T113-S3 Cortex-A7. The validated settings are
+`-mcpu=cortex-a7 -mfpu=neon-vfpv4 -mfloat-abi=hard`. A checksum-verified
+Bootlin GCC 15.3.0 ARMv7-EABI hard-float toolchain successfully built the CEmu
+core, standalone executable, probes, LVGL, and portable `ce_lvgl_app` layer.
+Desktop frontends were disabled and SDL3 was not linked.
+
+The standalone Release binary was verified as ELF32, little-endian ARM,
+EABI5, hard-float, PIE, using `/lib/ld-linux-armhf.so.3`; its only dynamic
+library dependency is the target libc. `readelf -A` reports ARMv7 application
+profile, VFPv4, NEON, and VFP-register arguments. This is a successful
+cross-compilation and ABI inspection only. It has not executed on T113
+hardware. Exact commands, install layout, Buildroot guidance, and first-board
+steps are in `docs/ARM_T113_DEPLOYMENT.md`.
+
 ## Resolved Black-Screen Incident
 
 The CEmu LCD was not defective. Four host integration bugs compounded:
@@ -478,7 +554,8 @@ Results:
 - Clean `CE_ENABLE_CEMU=ON` configure/build: passed. GCC emitted four warnings
   inside vendored CEmu (`keypad.c`, `cpu.c`, `flash.c`, and `mem.c`); project
   sources built without a reported warning.
-- CTest with CEmu enabled: 1/1 (`ce_rom_tests`) passed.
+- CTest with CEmu enabled: both the core suite and standalone CLI help test
+  passed.
 - Clean `CE_ENABLE_CEMU=OFF` configure/build: passed.
 - CTest with CEmu disabled: 1/1 passed.
 - `ce_boot_probe --count 120`: passed and reported no unsupported opcodes.
@@ -497,13 +574,28 @@ Results:
   colors. Visual inspection showed the same TI-84 Plus CE OS 5.3.0.0037
   `RAM Cleared` screen. Its PPM matched the reference host capture byte for
   byte, independently confirming orientation and RGB interpretation.
-- Desktop-window appearance, live updates, and LVGL-host keyboard interaction
-  have not yet been manually confirmed by the user.
+- The user manually confirmed the LVGL desktop window, live updates, TI-OS
+  keyboard interaction, and calculations.
 - A 120-frame capture differed byte-for-byte from the 600-frame capture,
   confirming that bounded runs honor their requested endpoint and the LCD is
   not a frozen buffer.
 - The earlier manual interactive milestone remains the strongest input test:
   TI-OS evaluated `69 + 420` as `489` through this wrapper and SDL host.
+- `calculator-emulator --help`, invalid CLI handling, missing-ROM handling,
+  clean signal shutdown, install staging, and a 600-tick x86 benchmark passed.
+  That sample achieved about 682.5 ticks/second (11.38x real time); it is only
+  a host sanity measurement, not a T113 forecast.
+- Debug and Release CTest runs pass. The historical test program uses
+  `assert()` for setup as well as checks, so its target explicitly keeps
+  assertions enabled under Release instead of allowing `NDEBUG` to remove
+  required setup calls.
+- A Release cross-build using Bootlin GCC 15.3.0 succeeded for CEmu, the
+  standalone app, probes, LVGL, and `ce_lvgl_app` with desktop/SDL targets off.
+- `file` and `readelf` confirmed the target app is ELF32 little-endian ARM,
+  ARMv7 application profile, EABI5 hard-float, VFPv4/NEON, dynamically linked
+  only to the target libc/loader.
+- CEmu and LVGL submodule pins remained exactly `fb10bfea...` and
+  `80ca777e...`, with clean submodule worktrees.
 
 The 1,000,000-tick CEmu probe is intentionally a debug-state probe. It must not
 be copied into a framebuffer host loop.
@@ -522,26 +614,30 @@ be copied into a framebuffer host loop.
   screenshot output, and keypad events work together end to end.
 - The portable LVGL application, SDL3 adapter, and bounded LVGL compositor path
   build and render the expected TI-OS framebuffer on x86-64.
+- The standalone SDL-independent Linux process builds, installs, handles its
+  CLI and termination signals, and benchmarks CEmu on x86-64.
+- The standalone process and portable LVGL application layer cross-compile for
+  Cortex-A7 as 32-bit ARM hard-float code.
 - Pause/resume and backend-neutral debug-state access exist in the wrapper.
 
 ## Current Limitations and Risks
 
 - The LVGL application is deliberately only the first TI framebuffer canvas;
   final application UI design has not started.
-- The LVGL desktop window's live visuals and input remain pending user manual
-  validation even though its bounded composited output has been inspected.
-- ARM/T113 compilation and runtime performance are untested.
-- There is no T113 display, keypad, camera, network, or Buildroot integration.
+- The ARM binary has not run on T113 hardware; runtime correctness,
+  performance, CPU/RAM use, thermals, and throttling remain untested.
+- The standalone target is deliberately headless until an actual T113 Linux
+  display and physical-keypad stack is selected and implemented.
+- There is no T113 display/keypad adapter or final Buildroot package/image.
+  Camera, networking, launcher, CAS, and AI belong to separate projects.
 - Physical USB is intentionally stubbed in the headless CEmu build.
-- CEmu probe/host tests are manual and require the private ROM; CTest covers
-  only the from-scratch core.
+- CEmu probe/host tests and the benchmark require the private ROM and remain
+  manual; CTest covers the from-scratch core and no-ROM CLI help.
 - The public API has the unit, framebuffer-contract, error-reporting,
   single-instance, and CMake-coupling limitations listed above.
 - The SDL host has no explicit real-time throttle, robust CLI diagnostics, or
   fully coherent keyboard map.
 - The from-scratch backend is incomplete and follows a fatal TI boot path.
-- The root is not a Git repository, so project history, tracked-file state,
-  and clean/dirty status are unavailable.
 - The vendored CEmu checkout has an uninitialized zdis submodule, though it is
   not needed by the current target set.
 - GPLv3 obligations must be accounted for in product distribution planning.
@@ -550,11 +646,15 @@ be copied into a framebuffer host loop.
 
 The intended port is a native C build for ARM Cortex-A7 Linux:
 
-1. Keep CEmu and all application callers behind `ce/emulator.h`.
-2. Cross-compile the headless core and a minimal benchmark/probe for the T113.
-3. Run the performance gate before optimizing or committing to UI budgets.
-4. Develop platform display/input adapters outside the emulator API.
-5. Reuse the same TI ROM behavior and 320x240 framebuffer contract.
+1. Keep CEmu and all application callers behind `ce/emulator.h`. **Done.**
+2. Cross-compile the headless process, benchmark, and portable LVGL layer for
+   Cortex-A7 hard-float. **Done with a generic toolchain.**
+3. Rebuild with the final Buildroot-generated toolchain and deploy the binary
+   plus the separately copied private ROM when hardware arrives.
+4. Run the documented performance gate before optimizing or committing to UI
+   budgets.
+5. Select display/input adapters from actual board, panel, kernel, and keypad
+   facts, keeping those types outside the emulator API.
 
 Do not emulate x86 on ARM and do not fork a second emulator scheduler.
 
@@ -581,6 +681,8 @@ Measure first. Optimize CEmu or the wrapper only in response to evidence.
 - Reuse CEmu hardware models and scheduler; do not rebuild them in the wrapper.
 - Keep SDL/LVGL/platform display and physical input outside emulator code.
 - Preserve `ce_host` as the known-good minimal frontend.
+- Keep this repository scoped to the standalone TI emulator process; launcher,
+  home UI, CAS, AI, and camera work belong elsewhere.
 - Treat `0xAARRGGBB` as ARGB8888 and validate actual RGB output.
 - One CEmu host frame advances one `CLOCK_RUN` tick unless a deliberately
   designed scheduler policy says otherwise.
@@ -605,14 +707,18 @@ Measure first. Optimize CEmu or the wrapper only in response to evidence.
 6. Those host bugs were fixed without replacing CEmu LCD logic. The real TI-OS
    UI and an interactive calculation were then verified end to end.
 7. LVGL v9.6.0 was vendored, and a portable canvas layer plus replaceable SDL3
-   adapter established the first x86 LVGL application path. Bounded output is
-   validated; user desktop interaction is pending.
+   adapter established the first x86 LVGL application path. Bounded output and
+   user desktop interaction were validated.
+8. The repository role was fixed as the standalone emulator application. SDL
+   became optional for headless builds, `calculator-emulator` added process and
+   benchmark behavior, and the target plus portable LVGL layer cross-compiled
+   successfully for Cortex-A7 hard-float.
 
 ## Exact Next Milestone
 
-Have the user manually launch `ce_lvgl_host` and confirm the desktop window,
-live TI-OS updates, and keyboard interaction (for example, evaluate a simple
-calculation). Do not design the final calculator UI or begin T113/Buildroot
-work as part of that validation. After confirmation, choose the next product
-application milestone explicitly while preserving `ce_host` as the reference
-frontend and CEmu behind the project API.
+When the physical T113-S3 arrives, rebuild with its exact Buildroot toolchain,
+inspect and install `calculator-emulator`, copy the private ROM separately,
+run the 600- and 3,600-tick benchmarks, and record CPU/RSS/thermal/frequency
+data plus clean signal shutdown. Do not optimize CEmu or implement target
+display/keypad support until those measurements and hardware interfaces are
+known. Follow `docs/ARM_T113_DEPLOYMENT.md` exactly.

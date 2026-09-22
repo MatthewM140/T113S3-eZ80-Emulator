@@ -265,8 +265,9 @@ The RAM backing array is irrelevant for low flash fetches.
 
 ## Backend Preservation Checkpoint
 
-The repository directory is not a Git working tree, so no commit, branch, or tag
-could be created. The existing from-scratch backend remains in `core/` with its
+At that historical checkpoint the repository directory was not a Git working
+tree, so no commit, branch, or tag could be created. It has since been
+initialized as the root Git repository. The existing from-scratch backend remains in `core/` with its
 original CMake targets and private-ROM probe; the ROM file is not being copied
 into any new backend or source distribution.
 
@@ -374,7 +375,64 @@ Validation completed:
   LVGL path preserved orientation and RGB channel interpretation for that
   frame.
 
-The user's desktop-window visual and interactive validation is explicitly
-pending. Building and headless screenshot inspection do not establish that
-live window input and updates feel correct. See `docs/LVGL_FRONTEND.md` for the
-architecture, controls, commands, and limitations.
+The user subsequently confirmed the desktop window, live updates, keyboard
+input, and TI-OS calculations. See `docs/LVGL_FRONTEND.md` for the architecture,
+controls, commands, and limitations.
+
+## Standalone Application and ARMv7-A Readiness
+
+The repository role is now explicitly the standalone TI emulator application
+for the larger calculator system. The launcher/home UI, CAS, AI, camera, and
+networking applications are separate future projects.
+
+The new stable executable is `calculator-emulator`. It links only the
+CEmu-backed project API and target libc, not SDL. Its CLI requires an external
+`--rom PATH`, accepts `--revision pre-a|i|m`, provides `--help`, diagnoses
+invalid options and ROM failures, and never embeds the private ROM. Normal
+operation is honestly headless until a target display/input adapter exists. It
+runs at a wall-clock-paced 60 scheduler ticks per second, handles `SIGINT` and
+`SIGTERM`, and exits cleanly.
+
+`--benchmark-ticks N` runs N separate `ce_emulator_run(emulator, 1U)` calls
+without wall-clock throttling and reports elapsed monotonic time, scheduler
+ticks/second, emulated seconds, and real-time factor. A 600-tick x86 sanity run
+completed in approximately 0.879 seconds, about 682.5 ticks/second or 11.38x
+real time. This is not a T113 prediction.
+
+Build coupling was corrected with `CE_ENABLE_DESKTOP_FRONTENDS`. SDL3 and
+`pkg-config` are now discovered only for `ce_host` and the SDL-backed LVGL
+frontend. Headless CEmu, the standalone process, and cross-builds no longer
+require desktop SDL. The portable LVGL application layer can still be built
+without the SDL adapter. `cmake --install` installs the stable executable under
+the selected binary prefix.
+
+A Release CTest run exposed that the preserved from-scratch test harness used
+`assert()` for setup calls, which `NDEBUG` removed. The test target now keeps
+assertions active in Release builds; no emulator behavior was changed, and
+both Debug and Release CTest runs pass.
+
+The configurable toolchain file
+`cmake/toolchains/armv7a-linux-gnueabihf.cmake` targets Cortex-A7 with
+`-mcpu=cortex-a7 -mfpu=neon-vfpv4 -mfloat-abi=hard`. Validation used the
+checksum-verified Bootlin 2026.08 ARMv7-EABI hard-float toolchain with GCC
+15.3.0. A Release build succeeded for the from-scratch core/probe, CEmu core
+and probe, `calculator-emulator`, LVGL, and `ce_lvgl_app`; desktop frontends
+were disabled.
+
+The produced `calculator-emulator` was verified as:
+
+```text
+ELF 32-bit LSB pie executable, ARM, EABI5, hard-float ABI
+interpreter: /lib/ld-linux-armhf.so.3
+```
+
+`readelf -A` reported ARMv7 application profile, VFPv4, NEON, and VFP-register
+arguments. The only dynamic runtime requirements were the target libc and
+hard-float loader. This verifies compilation and binary ABI, not execution on
+the physical T113-S3.
+
+The root is now a Git repository, CEmu and LVGL are proper clean submodules at
+their recorded commits, and root ROM files remain ignored. Full reproducible
+commands, Buildroot integration guidance, deployment paths, benchmark
+procedure, and the exact first-board checklist are in
+`docs/ARM_T113_DEPLOYMENT.md`.

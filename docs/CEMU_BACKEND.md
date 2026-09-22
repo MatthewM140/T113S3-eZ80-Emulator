@@ -227,7 +227,7 @@ wall-clock second and advances CEmu only through one-tick calls. Keyboard
 events return through `ce_emulator_key` and `emu_keypad_event`; no alternate
 keypad or scheduler implementation was added.
 
-The bounded dummy-video LVGL path has rendered the expected 320x240 TI-OS
-screen. User validation of the live desktop window and keyboard interaction is
-still pending. Dependency pinning, build/run commands, mappings, and the later
+The bounded dummy-video LVGL path rendered the expected 320x240 TI-OS screen,
+and the user subsequently validated the live desktop window and keyboard
+interaction. Dependency pinning, build/run commands, mappings, and the later
 T113 replacement boundary are documented in `docs/LVGL_FRONTEND.md`.

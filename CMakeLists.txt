@@ -3,9 +3,14 @@ cmake_minimum_required(VERSION 3.20)
 project(ce_emulator VERSION 0.1.0 LANGUAGES C)
 
 include(CTest)
+include(GNUInstallDirs)
 
 option(CE_ENABLE_CEMU "Build the CEmu-derived backend" ON)
-option(CE_ENABLE_LVGL "Build the LVGL x86 development frontend" ON)
+option(CE_ENABLE_LVGL "Build the portable LVGL application layer" ON)
+option(CE_ENABLE_DESKTOP_FRONTENDS
+       "Build SDL3 x86 development frontends" ON)
+option(CE_BUILD_TARGET_APP
+       "Build the standalone calculator-emulator Linux application" ON)
 
 add_library(ce_core STATIC
     core/src/machine.c
@@ -32,6 +37,9 @@ if(BUILD_TESTING)
     )
     target_link_libraries(ce_rom_tests PRIVATE ce_core)
     target_compile_features(ce_rom_tests PRIVATE c_std_11)
+    # This historical test harness uses assert() for both setup calls and
+    # checks, so keep assertions active even in Release configurations.
+    target_compile_options(ce_rom_tests PRIVATE -UNDEBUG)
     add_test(NAME ce_rom_tests COMMAND ce_rom_tests)
 endif()
 
@@ -70,12 +78,31 @@ if(CE_ENABLE_CEMU)
     target_compile_features(ce_cemu_boot_probe PRIVATE c_std_11)
     target_include_directories(ce_cemu_boot_probe PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/core/include)
 
-    find_package(PkgConfig REQUIRED)
-    pkg_check_modules(SDL3 REQUIRED IMPORTED_TARGET sdl3)
-    add_executable(ce_host host/ce_host.c)
-    target_link_libraries(ce_host PRIVATE ce_cemu_core PkgConfig::SDL3)
-    target_compile_features(ce_host PRIVATE c_std_11)
-    target_include_directories(ce_host PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/core/include)
+    if(CE_BUILD_TARGET_APP)
+        add_executable(calculator-emulator app/calculator_emulator.c)
+        target_link_libraries(calculator-emulator PRIVATE ce_cemu_core)
+        target_compile_features(calculator-emulator PRIVATE c_std_11)
+        target_compile_options(calculator-emulator PRIVATE
+            -Wall -Wextra -Wpedantic -Wconversion -Wsign-conversion)
+        target_include_directories(calculator-emulator PRIVATE
+            ${CMAKE_CURRENT_SOURCE_DIR}/core/include)
+        install(TARGETS calculator-emulator
+            RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR})
+        if(BUILD_TESTING)
+            add_test(NAME calculator_emulator_help
+                COMMAND calculator-emulator --help)
+        endif()
+    endif()
+
+    if(CE_ENABLE_DESKTOP_FRONTENDS)
+        find_package(PkgConfig REQUIRED)
+        pkg_check_modules(SDL3 REQUIRED IMPORTED_TARGET sdl3)
+
+        add_executable(ce_host host/ce_host.c)
+        target_link_libraries(ce_host PRIVATE ce_cemu_core PkgConfig::SDL3)
+        target_compile_features(ce_host PRIVATE c_std_11)
+        target_include_directories(ce_host PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/core/include)
+    endif()
 
     if(CE_ENABLE_LVGL)
         # LVGL is pinned under third_party/lvgl. Keep its desktop backend out
@@ -102,7 +129,9 @@ if(CE_ENABLE_CEMU)
                 ${CMAKE_CURRENT_SOURCE_DIR}/app
                 ${CMAKE_CURRENT_SOURCE_DIR}/core/include)
         target_link_libraries(ce_lvgl_app PUBLIC lvgl::lvgl PRIVATE ce_cemu_core)
+    endif()
 
+    if(CE_ENABLE_DESKTOP_FRONTENDS AND CE_ENABLE_LVGL)
         add_library(ce_lvgl_sdl3 STATIC platform/sdl3/ce_lvgl_sdl3.c)
         target_compile_features(ce_lvgl_sdl3 PUBLIC c_std_11)
         target_compile_options(ce_lvgl_sdl3 PRIVATE -Wall -Wextra -Wpedantic)
