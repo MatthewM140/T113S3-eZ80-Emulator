@@ -1,0 +1,6 @@
+[submodule "third_party/cemu"]
+	path = third_party/cemu
+	url = https://github.com/CE-Programming/CEmu.git
+[submodule "third_party/lvgl"]
+	path = third_party/lvgl
+	url = https://github.com/lvgl/lvgl.git

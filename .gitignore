@@ -1,0 +1,6 @@
+/build/
+/build-*/
+compile_commands.json
+
+# Private calculator dumps must never be committed.
+/*.rom
